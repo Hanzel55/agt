@@ -4,29 +4,44 @@ import pyodbc
 import datetime
 import decimal
 import uuid
-
-def convert_to_string_if_needed(value):
-    """Convert decimal, datetime, uuid, and bytes types to string.
-       Returns the value as-is if it's not one of these types.
+import pandas as pd
+from pandas.api.types import is_datetime64_any_dtype
+from pandas_utils import is_uuid_column
+def convert_to_string_if_needed(df):
+    """Convert columns containing decimal, datetime, uuid, and bytes types to string.
+       Works on entire DataFrame columns for better performance.
+       If any value in a column is of a specific type, converts the entire column to string.
+       Returns the converted DataFrame.
     """
-    # Check for decimal
-    if isinstance(value, decimal.Decimal):
-        return str(value)
+    df = df.copy()  # Work on a copy to avoid modifying original
     
-    # Check for datetime/date/time
-    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
-        return str(value)
+    for column in df.columns:
+        # Check if the column contains any non-null values
+        non_null_values = df[column].dropna()
+        
+        if len(non_null_values) > 0:
+            # Check if any value in the column is of a specific type
+            # Check for decimal/float
+            if pd.api.types.is_float_dtype(df[column]):
+                df[column] = df[column].astype(str)
+                continue
+            
+            # Check for datetime/date/time
+            if is_datetime64_any_dtype(df[column]):
+                df[column] = df[column].astype(str)
+                continue
+            
+            # # Check for UUID
+            if is_uuid_column(df[column]):
+                df[column] = df[column].astype(str)
+                continue
+            
+            # # Check for bytes/bytearray
+            # if any(isinstance(val, (bytes, bytearray)) for val in non_null_values[:100]):
+            #     df[column] = df[column].apply(lambda x: str(x) if pd.notna(x) else x)
+            #     continue
     
-    # Check for UUID
-    if isinstance(value, uuid.UUID):
-        return str(value)
-    
-    # Check for bytes/bytearray
-    if isinstance(value, (bytes, bytearray)):
-        return str(value)
-    
-    # Return as-is for all other types
-    return value
+    return df
 
 
 def connect_to_postgres():
@@ -61,16 +76,17 @@ def connect_to_postgres():
         # Fetch the result (10 rows)
         rows = cursor.fetchall()
 
-        # Convert rows to a list of dictionaries
-        column_names = [desc[0] for desc in cursor.description]  # Get column names
-        records = []
-        for row in rows:
-            record = {}
-            for i in range(len(row)):
-                record[column_names[i]] = convert_to_string_if_needed(row[i])
-            records.append(record)
+        # Get column names
+        column_names = [desc[0] for desc in cursor.description]
         
+        # Load data into DataFrame
+        df = pd.DataFrame(rows, columns=column_names)
         
+        # Convert columns with special types to string
+        df = convert_to_string_if_needed(df)
+        
+        # Convert DataFrame to list of dictionaries
+        records = df.to_dict('records')
 
         # Return the list of records
         print("send")
@@ -129,14 +145,17 @@ def connect_to_sql_server():
         # Fetch the result (10 rows)
         rows = cursor.fetchall()
 
-        # Convert rows to a list of dictionaries
-        column_names = [column[0] for column in cursor.description]  # Get column names
-        records = []
-        for row in rows:
-            record = {}
-            for i in range(len(row)):
-                record[column_names[i]] = convert_to_string_if_needed(row[i])
-            records.append(record)
+        # Get column names
+        column_names = [column[0] for column in cursor.description]
+        
+        # Load data into DataFrame
+        df = pd.DataFrame(rows, columns=column_names)
+        
+        # Convert columns with special types to string
+        df = convert_to_string_if_needed(df)
+        
+        # Convert DataFrame to list of dictionaries
+        records = df.to_dict('records')
         
         # Return the list of records
         print("send")

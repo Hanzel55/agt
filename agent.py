@@ -7,7 +7,7 @@ from db_utils import connect_to_postgres, connect_to_sql_server
 
 
 AGENT_ID = "agent-123"
-SERVER_ADDRESS = "localhost:50051"
+SERVER_ADDRESS = "136.116.179.12:50051"
 
 
 async def sender(stream, send_queue):
