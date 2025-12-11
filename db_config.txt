@@ -1,0 +1,6 @@
+host - internal ip
+port
+database
+username
+password
+schema

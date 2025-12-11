@@ -1,13 +1,22 @@
 import grpc
 import asyncio
 import json
+import decimal
 import app_pb2
 import app_pb2_grpc
 from db_utils import connect_to_postgres, connect_to_sql_server
 
 
 AGENT_ID = "agent-123"
-SERVER_ADDRESS = "136.116.179.12:50051"
+SERVER_ADDRESS = "localhost:50051"
+
+
+class DecimalEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles Decimal objects."""
+    def default(self, obj):
+        if isinstance(obj, decimal.Decimal):
+            return str(obj)
+        return super(DecimalEncoder, self).default(obj)
 
 
 async def sender(stream, send_queue):
@@ -25,22 +34,27 @@ async def receiver(stream, send_queue):
         if server_msg.query and server_msg.database:
             print("[AGENT] Executing DB query...")
             req_id = server_msg.request_id 
-
+            print(server_msg.tbl_name,"[[[[[[[]]]]]]]")
             # returns list-of-dicts already JSON-safe
             if server_msg.database == "postgres":
-                records = connect_to_postgres()
+                error, records , column_metadata = connect_to_postgres(server_msg.query)
             elif server_msg.database == "sqlserver":
-                records = connect_to_sql_server()
+                error, records , column_metadata = connect_to_sql_server(server_msg.query,server_msg.tbl_name)
             else:
                 print("[AGENT] Unsupported database type")
                 continue
-
-            response = app_pb2.AgentMessage(
-                query_result = app_pb2.QueryResult(
-                    json=json.dumps(records),
-                    request_id=req_id
+            try:
+                response = app_pb2.AgentMessage(
+                    message=error,
+                    query_result = app_pb2.QueryResult(
+                        json=json.dumps(records, cls=DecimalEncoder),
+                        request_id=req_id,
+                        tbl_meta_data=json.dumps(column_metadata)
+                    )
                 )
-            )
+            except Exception as e:
+                print("[AGENT] Error:", e)
+                continue
 
             print("[AGENT] Sending query result...")
             await send_queue.put(response)
@@ -83,8 +97,8 @@ async def run_agent():
                 # wait for all tasks
                 await asyncio.gather(sender_task, receiver_task, heartbeat_task)
         except grpc.aio.AioRpcError as e:
-            print("\n[AGENT] ❌ Connection lost or server offline:", e)
-            print("[AGENT] 🔄 Retrying in 5 seconds...\n")
+            print("\n[AGENT]  Connection lost or server offline:", e)
+            print("[AGENT]  Retrying in 5 seconds...\n")
             await asyncio.sleep(5)
 
 if __name__ == "__main__":
